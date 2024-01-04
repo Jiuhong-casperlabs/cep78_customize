@@ -3,3 +3,15 @@ Cargo.lock
 wasm
 .vscode/
 .DS_Store
+args
+client-js/.env_bk
+compile.log
+json/
+note
+note _testnet
+note_integration-test
+note_nctl
+note_nctl_for_xp
+note_nctl_for_xp_bk
+result.json
+.gitignore

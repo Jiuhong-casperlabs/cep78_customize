@@ -39,15 +39,16 @@ use constants::{
     ARG_ADDITIONAL_REQUIRED_METADATA, ARG_ALLOW_MINTING, ARG_APPROVE_ALL, ARG_BURN_MODE,
     ARG_COLLECTION_NAME, ARG_COLLECTION_SYMBOL, ARG_CONTRACT_WHITELIST, ARG_EVENTS_MODE,
     ARG_HASH_KEY_NAME_1_0_0, ARG_HOLDER_MODE, ARG_IDENTIFIER_MODE, ARG_JSON_SCHEMA,
-    ARG_METADATA_MUTABILITY, ARG_MINTING_MODE, ARG_NAMED_KEY_CONVENTION, ARG_NFT_KIND,
-    ARG_NFT_METADATA_KIND, ARG_NFT_PACKAGE_KEY, ARG_OPERATOR, ARG_OPERATOR_BURN_MODE,
-    ARG_OPTIONAL_METADATA, ARG_OWNERSHIP_MODE, ARG_OWNER_LOOKUP_MODE, ARG_PACKAGE_OPERATOR_MODE,
-    ARG_RECEIPT_NAME, ARG_SOURCE_KEY, ARG_SPENDER, ARG_TARGET_KEY, ARG_TOKEN_HASH, ARG_TOKEN_ID,
-    ARG_TOKEN_META_DATA, ARG_TOKEN_OWNER, ARG_TOTAL_TOKEN_SUPPLY, ARG_TRANSFER_FILTER_CONTRACT,
-    ARG_WHITELIST_MODE, BURNT_TOKENS, BURN_MODE, COLLECTION_NAME, COLLECTION_SYMBOL,
-    ENTRY_POINT_APPROVE, ENTRY_POINT_BALANCE_OF, ENTRY_POINT_BURN, ENTRY_POINT_GET_APPROVED,
-    ENTRY_POINT_INIT, ENTRY_POINT_IS_APPROVED_FOR_ALL, ENTRY_POINT_METADATA, ENTRY_POINT_MIGRATE,
-    ENTRY_POINT_MINT, ENTRY_POINT_OWNER_OF, ENTRY_POINT_REGISTER_OWNER, ENTRY_POINT_REVOKE,
+    ARG_METADATA_MUTABILITY, ARG_MINTING_MODE, ARG_MULTI_TOKEN_META_DATA, ARG_MULTI_TOKEN_OWNERS,
+    ARG_NAMED_KEY_CONVENTION, ARG_NFT_KIND, ARG_NFT_METADATA_KIND, ARG_NFT_PACKAGE_KEY,
+    ARG_OPERATOR, ARG_OPERATOR_BURN_MODE, ARG_OPTIONAL_METADATA, ARG_OWNERSHIP_MODE,
+    ARG_OWNER_LOOKUP_MODE, ARG_PACKAGE_OPERATOR_MODE, ARG_RECEIPT_NAME, ARG_SOURCE_KEY,
+    ARG_SPENDER, ARG_TARGET_KEY, ARG_TOKEN_HASH, ARG_TOKEN_ID, ARG_TOKEN_META_DATA,
+    ARG_TOKEN_OWNER, ARG_TOTAL_TOKEN_SUPPLY, ARG_TRANSFER_FILTER_CONTRACT, ARG_WHITELIST_MODE,
+    BURNT_TOKENS, BURN_MODE, COLLECTION_NAME, COLLECTION_SYMBOL, ENTRY_POINT_APPROVE,
+    ENTRY_POINT_BALANCE_OF, ENTRY_POINT_BURN, ENTRY_POINT_GET_APPROVED, ENTRY_POINT_INIT,
+    ENTRY_POINT_IS_APPROVED_FOR_ALL, ENTRY_POINT_METADATA, ENTRY_POINT_MIGRATE, ENTRY_POINT_MINT,
+    ENTRY_POINT_MULTI_MINT, ENTRY_POINT_OWNER_OF, ENTRY_POINT_REGISTER_OWNER, ENTRY_POINT_REVOKE,
     ENTRY_POINT_SET_APPROVALL_FOR_ALL, ENTRY_POINT_SET_TOKEN_METADATA, ENTRY_POINT_SET_VARIABLES,
     ENTRY_POINT_TRANSFER, ENTRY_POINT_UPDATED_RECEIPTS, EVENTS_MODE, HASH_BY_INDEX,
     HASH_KEY_NAME_1_0_0, HOLDER_MODE, IDENTIFIER_MODE, INDEX_BY_HASH, INSTALLER, JSON_SCHEMA,
@@ -616,7 +617,7 @@ pub extern "C" fn set_variables() {
 
 // Mints a new token. Minting will fail if allow_minting is set to false.
 #[no_mangle]
-pub extern "C" fn mint() {
+pub extern "C" fn bk_mint() {
     // The contract owner can toggle the minting behavior on and off over time.
     // The contract is toggled on by default.
     let minting_status = utils::get_stored_value_with_user_errors::<bool>(
@@ -866,6 +867,304 @@ pub extern "C" fn mint() {
         let receipt = CLValue::from_t((receipt_string, receipt_address, token_identifier_string))
             .unwrap_or_revert_with(NFTCoreError::FailedToConvertToCLValue);
         runtime::ret(receipt)
+    }
+}
+
+// Mints multi token. Minting will fail if allow_minting is set to false.
+#[no_mangle]
+pub extern "C" fn mint() {
+    let token_metadata = utils::get_named_arg_with_user_errors::<String>(
+        ARG_TOKEN_META_DATA,
+        NFTCoreError::MissingTokenMetaData,
+        NFTCoreError::InvalidTokenMetaData,
+    )
+    .unwrap_or_revert();
+
+    let token_owner: Key = runtime::get_named_arg(ARG_TOKEN_OWNER);
+
+    let receipt = internal_mint(token_owner, token_metadata);
+
+    if let OwnerReverseLookupMode::Complete = utils::get_reporting_mode() {
+        let result = CLValue::from_t(receipt.unwrap())
+            .unwrap_or_revert_with(NFTCoreError::FailedToConvertToCLValue);
+        runtime::ret(result)
+    }
+}
+
+// Mints multi token. Minting will fail if allow_minting is set to false.
+#[no_mangle]
+pub extern "C" fn multi_mint() {
+    let token_metadatas = utils::get_named_arg_with_user_errors::<Vec<String>>(
+        ARG_MULTI_TOKEN_META_DATA,
+        NFTCoreError::MissingTokenMetaData,
+        NFTCoreError::InvalidTokenMetaData,
+    )
+    .unwrap_or_revert();
+
+    let token_owners: Vec<Key> = runtime::get_named_arg(ARG_MULTI_TOKEN_OWNERS);
+
+    if token_metadatas.len() != token_owners.len() {
+        runtime::revert(NFTCoreError::MultiMintLength)
+    }
+
+    let mut receipts: Vec<(String, Key, String)> = vec![];
+    for (arg_token_owner, token_metadata) in token_owners.iter().zip(token_metadatas.iter()) {
+        let receipt = internal_mint(*arg_token_owner, token_metadata.to_string());
+        if receipt.is_some() {
+            receipts.push(receipt.unwrap())
+        }
+    }
+    if let OwnerReverseLookupMode::Complete = utils::get_reporting_mode() {
+        let result =
+            CLValue::from_t(receipts).unwrap_or_revert_with(NFTCoreError::FailedToConvertToCLValue);
+        runtime::ret(result)
+    }
+}
+
+fn internal_mint(arg_token_owner: Key, token_metadata: String) -> Option<(String, Key, String)> {
+    // The contract owner can toggle the minting behavior on and off over time.
+    // The contract is toggled on by default.
+    let minting_status = utils::get_stored_value_with_user_errors::<bool>(
+        ALLOW_MINTING,
+        NFTCoreError::MissingAllowMinting,
+        NFTCoreError::InvalidAllowMinting,
+    );
+
+    // If contract minting behavior is currently toggled off we revert.
+    if !minting_status {
+        runtime::revert(NFTCoreError::MintingIsPaused);
+    }
+
+    let total_token_supply = utils::get_stored_value_with_user_errors::<u64>(
+        TOTAL_TOKEN_SUPPLY,
+        NFTCoreError::MissingTotalTokenSupply,
+        NFTCoreError::InvalidTotalTokenSupply,
+    );
+
+    // The minted_tokens_count is the number of minted tokens so far.
+    let minted_tokens_count = utils::get_stored_value_with_user_errors::<u64>(
+        NUMBER_OF_MINTED_TOKENS,
+        NFTCoreError::MissingNumberOfMintedTokens,
+        NFTCoreError::InvalidNumberOfMintedTokens,
+    );
+
+    // Revert if the token supply has been exhausted.
+    if minted_tokens_count >= total_token_supply {
+        runtime::revert(NFTCoreError::TokenSupplyDepleted);
+    }
+
+    let minting_mode: MintingMode = utils::get_stored_value_with_user_errors::<u8>(
+        MINTING_MODE,
+        NFTCoreError::MissingMintingMode,
+        NFTCoreError::InvalidMintingMode,
+    )
+    .try_into()
+    .unwrap_or_revert();
+
+    let (caller, contract_package): (Key, Option<Key>) =
+        match utils::get_verified_caller().unwrap_or_revert() {
+            Caller::Session(account_hash) => (account_hash.into(), None),
+            Caller::StoredCaller(contract_hash, contract_package_hash) => {
+                (contract_hash.into(), Some(contract_package_hash.into()))
+            }
+        };
+
+    // Revert if minting is private and caller is not installer.
+    if MintingMode::Installer == minting_mode {
+        match caller.tag() {
+            KeyTag::Account => {
+                let installer_account = runtime::get_key(INSTALLER)
+                    .unwrap_or_revert_with(NFTCoreError::MissingInstallerKey)
+                    .into_account()
+                    .unwrap_or_revert_with(NFTCoreError::FailedToConvertToAccountHash);
+
+                // Revert if private minting is required and caller is not installer.
+                if runtime::get_caller() != installer_account {
+                    runtime::revert(NFTCoreError::InvalidMinter)
+                }
+            }
+            _ => runtime::revert(NFTCoreError::InvalidKey),
+        }
+    }
+
+    // Revert if minting is acl and caller is not whitelisted.
+    if MintingMode::Acl == minting_mode {
+        let acl_package_mode: bool = utils::get_stored_value_with_user_errors::<bool>(
+            ACL_PACKAGE_MODE,
+            NFTCoreError::MissingACLPackageMode,
+            NFTCoreError::InvalidACLPackageMode,
+        );
+        let is_whitelisted = match (acl_package_mode, contract_package) {
+            (true, Some(contract_package)) => utils::get_dictionary_value_from_key::<bool>(
+                ACL_WHITELIST,
+                &utils::encode_dictionary_item_key(contract_package),
+            )
+            .unwrap_or_default(),
+            _ => utils::get_dictionary_value_from_key::<bool>(
+                ACL_WHITELIST,
+                &utils::encode_dictionary_item_key(caller),
+            )
+            .unwrap_or_default(),
+        };
+
+        match caller.tag() {
+            KeyTag::Hash => {
+                if !is_whitelisted {
+                    runtime::revert(NFTCoreError::UnlistedContractHash)
+                }
+            }
+            KeyTag::Account => {
+                if !is_whitelisted {
+                    runtime::revert(NFTCoreError::InvalidMinter);
+                }
+            }
+            _ => runtime::revert(NFTCoreError::InvalidKey),
+        }
+    }
+
+    let metadata_kinds: BTreeMap<NFTMetadataKind, Requirement> =
+        utils::get_stored_value_with_user_errors(
+            NFT_METADATA_KINDS,
+            NFTCoreError::MissingNFTMetadataKind,
+            NFTCoreError::InvalidNFTMetadataKind,
+        );
+
+    let identifier_mode: NFTIdentifierMode = utils::get_stored_value_with_user_errors::<u8>(
+        IDENTIFIER_MODE,
+        NFTCoreError::MissingIdentifierMode,
+        NFTCoreError::InvalidIdentifierMode,
+    )
+    .try_into()
+    .unwrap_or_revert();
+
+    // This is the token ID.
+    let optional_token_hash: String = utils::get_optional_named_arg_with_user_errors::<String>(
+        ARG_TOKEN_HASH,
+        NFTCoreError::InvalidIdentifier,
+    )
+    .unwrap_or_default();
+    let token_identifier: TokenIdentifier = match identifier_mode {
+        NFTIdentifierMode::Ordinal => TokenIdentifier::Index(minted_tokens_count),
+        NFTIdentifierMode::Hash => TokenIdentifier::Hash(if optional_token_hash.is_empty() {
+            base16::encode_lower(&runtime::blake2b(token_metadata.clone()))
+        } else {
+            optional_token_hash
+        }),
+    };
+
+    for (metadata_kind, required) in metadata_kinds {
+        if required == Requirement::Unneeded {
+            continue;
+        }
+        let token_metadata_validation =
+            metadata::validate_metadata(&metadata_kind, token_metadata.clone());
+        match token_metadata_validation {
+            Ok(validated_token_metadata) => {
+                utils::upsert_dictionary_value_from_key(
+                    &metadata::get_metadata_dictionary_name(&metadata_kind),
+                    &token_identifier.get_dictionary_item_key(),
+                    validated_token_metadata,
+                );
+            }
+            Err(err) => {
+                if required == Requirement::Required {
+                    runtime::revert(err);
+                }
+            }
+        }
+    }
+
+    // The contract's ownership behavior (determined at installation) determines,
+    // who owns the NFT we are about to mint.()
+    let ownership_mode = utils::get_ownership_mode().unwrap_or_revert();
+    let token_owner_key: Key =
+        if let OwnershipMode::Assigned | OwnershipMode::Transferable = ownership_mode {
+            arg_token_owner
+        } else {
+            caller
+        };
+
+    utils::upsert_dictionary_value_from_key(
+        TOKEN_OWNERS,
+        &token_identifier.get_dictionary_item_key(),
+        token_owner_key,
+    );
+    utils::upsert_dictionary_value_from_key(
+        TOKEN_ISSUERS,
+        &token_identifier.get_dictionary_item_key(),
+        caller,
+    );
+    let owned_tokens_item_key = utils::encode_dictionary_item_key(token_owner_key);
+
+    if let NFTIdentifierMode::Hash = identifier_mode {
+        // Update the forward and reverse trackers
+        utils::insert_hash_id_lookups(minted_tokens_count, token_identifier.clone());
+    }
+
+    //Increment the count of owned tokens.
+    let updated_token_count =
+        match utils::get_dictionary_value_from_key::<u64>(TOKEN_COUNT, &owned_tokens_item_key) {
+            Some(balance) => balance + 1u64,
+            None => 1u64,
+        };
+    utils::upsert_dictionary_value_from_key(
+        TOKEN_COUNT,
+        &owned_tokens_item_key,
+        updated_token_count,
+    );
+
+    // Increment number_of_minted_tokens by one
+    let number_of_minted_tokens_uref = utils::get_uref(
+        NUMBER_OF_MINTED_TOKENS,
+        NFTCoreError::MissingTotalTokenSupply,
+        NFTCoreError::InvalidTotalTokenSupply,
+    );
+    storage::write(number_of_minted_tokens_uref, minted_tokens_count + 1u64);
+
+    // Emit Mint event.
+    let events_mode: EventsMode =
+        EventsMode::try_from(utils::get_stored_value_with_user_errors::<u8>(
+            EVENTS_MODE,
+            NFTCoreError::MissingEventsMode,
+            NFTCoreError::InvalidEventsMode,
+        ))
+        .unwrap_or_revert();
+
+    match events_mode {
+        EventsMode::NoEvents => {}
+        EventsMode::CES => casper_event_standard::emit(Mint::new(
+            token_owner_key,
+            token_identifier.clone(),
+            token_metadata,
+        )),
+        EventsMode::CEP47 => record_cep47_event_dictionary(CEP47Event::Mint {
+            recipient: token_owner_key,
+            token_id: token_identifier.clone(),
+        }),
+    }
+
+    if let OwnerReverseLookupMode::Complete = utils::get_reporting_mode() {
+        if (NFTIdentifierMode::Hash == identifier_mode)
+            && runtime::get_key(OWNED_TOKENS).is_some()
+            && utils::should_migrate_token_hashes(token_owner_key)
+        {
+            utils::migrate_token_hashes(token_owner_key)
+        }
+
+        let (page_table_entry, page_uref) = utils::add_page_entry_and_page_record(
+            minted_tokens_count,
+            &owned_tokens_item_key,
+            true,
+        );
+
+        let receipt_string = utils::get_receipt_name(page_table_entry);
+        let receipt_address = Key::dictionary(page_uref, owned_tokens_item_key.as_bytes());
+        let token_identifier_string = token_identifier.get_dictionary_item_key();
+
+        let receipt = (receipt_string, receipt_address, token_identifier_string);
+        Some(receipt)
+    } else {
+        None
     }
 }
 
@@ -2276,7 +2575,7 @@ fn generate_entry_points() -> EntryPoints {
     // account is listed as the token owner, as well as added to the accounts list of owned
     // tokens. After minting is successful the number_of_minted_tokens is incremented by
     // one.
-    let mint = EntryPoint::new(
+    let single_mint = EntryPoint::new(
         ENTRY_POINT_MINT,
         vec![
             Parameter::new(ARG_TOKEN_OWNER, CLType::Key),
@@ -2287,6 +2586,22 @@ fn generate_entry_points() -> EntryPoints {
             Box::new(CLType::Key),
             Box::new(CLType::String),
         ]),
+        EntryPointAccess::Public,
+        EntryPointType::Contract,
+    );
+
+    // mint multiple tokens
+    let multi_mint = EntryPoint::new(
+        ENTRY_POINT_MULTI_MINT,
+        vec![
+            Parameter::new(ARG_TOKEN_OWNER, CLType::List(Box::new(CLType::Key))),
+            Parameter::new(ARG_TOKEN_META_DATA, CLType::List(Box::new(CLType::String))),
+        ],
+        CLType::List(Box::new(CLType::Tuple3([
+            Box::new(CLType::String),
+            Box::new(CLType::Key),
+            Box::new(CLType::String),
+        ]))),
         EntryPointAccess::Public,
         EntryPointType::Contract,
     );
@@ -2459,7 +2774,8 @@ fn generate_entry_points() -> EntryPoints {
 
     entry_points.add_entry_point(init_contract);
     entry_points.add_entry_point(set_variables);
-    entry_points.add_entry_point(mint);
+    entry_points.add_entry_point(single_mint);
+    entry_points.add_entry_point(multi_mint);
     entry_points.add_entry_point(burn);
     entry_points.add_entry_point(transfer);
     entry_points.add_entry_point(approve);
