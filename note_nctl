@@ -1,0 +1,67 @@
+casper-client put-deploy -n http://localhost:11101 --chain-name "casper-net-1" \
+--payment-amount 500000000000 \
+-k /home/jh/casper-node/utils/nctl/assets/net-1/users/user-1/secret_key.pem \
+--session-path /home/jh/caspereco/cep-78-enhanced-nft/contract/target/wasm32-unknown-unknown/release/contract.wasm \
+--session-arg "collection_name:string='CEP-78-collection'" \
+--session-arg "collection_symbol:string='CEP78'" \
+--session-arg "total_token_supply:u64='10'" \
+--session-arg "ownership_mode:u8='2'" \
+--session-arg "nft_kind:u8='1'" \
+--session-arg "nft_metadata_kind:u8='0'" \
+--session-arg "json_schema:string=''" \
+--session-arg "identifier_mode:u8='0'" \
+--session-arg "owner_reverse_lookup_mode:u8='0'" \
+--session-arg "events_mode:u8:'2'" \
+--session-arg "metadata_mutability:u8='0'" 
+
+casper-client get-deploy -n http://localhost:11101 \
+0b53d5889f6cb08f261f89ba6430c2ce5956d45577ece67428f01a071c18b2f5
+
+                {
+                  "key": "hash-dbfc236d2945fac68427069cabc76ac4b26eb17a2b8d4534946837e323c0eedb",
+                  "transform": "WriteContract"
+                },
+                {
+                  "key": "hash-0b13427be2c9a648358eee62ab34f818e6d4195e7686368aa335f80fa16cdeae",
+                  "transform": "WriteContractPackage"
+                },
+====
+
+casper-client put-deploy -n http://localhost:11101/rpc \
+--chain-name "casper-net-1" \
+--payment-amount 50000000000 \
+-k ~/casper-node/utils/nctl/assets/net-1/nodes/node-3/keys/secret_key.pem \
+--session-path /home/jh/caspereco/cep-78-enhanced-nft/client/mint_session/target/wasm32-unknown-unknown/release/mint_call.wasm \
+--session-arg "nft_contract_hash:key='hash-ee5afadb89861a026e07989030ef6a519cb269a0e8ef746a248a57149cd8221d'" \
+--session-arg "collection_name:string='cep78_CEP-78-collection'" \
+--session-arg "token_owner:key='account-hash-bedccfc34a4ba66c6e53474e9642153d038edb296cbdce5dd147ebadb87f896f'"  \
+--session-arg "token_meta_data:string='{\"name\": \"John Doe\",\"token_uri\": \"https:\/\/www.barfoo.com\",\"checksum\": \"940bffb3f2bba35f84313aa26da09ece3ad47045c6a1292c2bbd2df4ab1a55fb\"}'"
+
+casper-client get-deploy -n http://localhost:11101  \
+1aaa4277845e7e1c78985e587d2fcd87890c31179456d7948a121ff5d6f3e4da
+
+====
+--session-arg "token_owner:key='account-hash-b5a452a6e209820abc08e01faeff08e0137d8d9d0d2e91928802a692ed96c325'"  \
+--session-arg "token_owner:key='account-hash-ea37ec7e94776c50d7222e01c164d4ce1417af146746b8c0d2d67cdd268a30a3'"  \
+
+
+===
+
+casper-client put-deploy -n http://localhost:11101/rpc \
+--chain-name "casper-net-1" \
+--payment-amount 7500000000 \
+-k /home/jh/casper-node/utils/nctl/assets/net-1/users/user-1/secret_key.pem \
+--session-package-hash hash-0b13427be2c9a648358eee62ab34f818e6d4195e7686368aa335f80fa16cdeae \
+--session-entry-point "mint" \
+--session-arg "token_owner:key='account-hash-c30fba121a352c6423961f9755ce08bfdb9b6ccd4fcb3d9ea308f9fcc2e5d509'" \
+--session-arg "token_meta_data:string='{\"name\": \"John Doe\",\"token_uri\": \"https:\/\/www.barfoo.com\",\"checksum\": \"940bffb3f2bba35f84313aa26da09ece3ad47045c6a1292c2bbd2df4ab1a55fb\"}'"
+
+==================
+casper-client put-deploy -n http://localhost:11101/rpc \
+--chain-name "casper-net-1" \
+--payment-amount 7500000000 \
+-k /home/jh/casper-node/utils/nctl/assets/net-1/users/user-1/secret_key.pem \
+--session-package-hash hash-0b13427be2c9a648358eee62ab34f818e6d4195e7686368aa335f80fa16cdeae \
+--session-entry-point "multi_mint" \
+--session-args-json \
+'[{"name":"multi_token_meta_data","type":{"List":"String"},"value":["{\"name\": \"John Doe\",\"token_uri\": \"https:\/\/www.barfoo1.com\",\"checksum\": \"940bffb3f2bba35f84313aa26da09ece3ad47045c6a1292c2bbd2df4ab1a55fb\"}","{\"name\": \"John Doe\",\"token_uri\": \"https:\/\/www.barfoo2.com\",\"checksum\": \"940bffb3f2bba35f84313aa26da09ece3ad47045c6a1292c2bbd2df4ab1a55fb\"}"]},{"name":"multi_token_owners","type":{"List":"Key"},"value":["account-hash-c30fba121a352c6423961f9755ce08bfdb9b6ccd4fcb3d9ea308f9fcc2e5d509","account-hash-a254c35af567541efbac1b023086cd888fbbda7664f620f810b427ad727c99ab"]}]' 

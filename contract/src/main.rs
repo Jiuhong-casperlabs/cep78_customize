@@ -2594,8 +2594,11 @@ fn generate_entry_points() -> EntryPoints {
     let multi_mint = EntryPoint::new(
         ENTRY_POINT_MULTI_MINT,
         vec![
-            Parameter::new(ARG_TOKEN_OWNER, CLType::List(Box::new(CLType::Key))),
-            Parameter::new(ARG_TOKEN_META_DATA, CLType::List(Box::new(CLType::String))),
+            Parameter::new(ARG_MULTI_TOKEN_OWNERS, CLType::List(Box::new(CLType::Key))),
+            Parameter::new(
+                ARG_MULTI_TOKEN_META_DATA,
+                CLType::List(Box::new(CLType::String)),
+            ),
         ],
         CLType::List(Box::new(CLType::Tuple3([
             Box::new(CLType::String),
